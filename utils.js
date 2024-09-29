@@ -1,7 +1,5 @@
 const QRCode = require('qrcode');
 const crypto = require('crypto');
-const fs = require('fs');
-const fsp = require('fs').promises;
 
 
 function generateQRCode(path, text){

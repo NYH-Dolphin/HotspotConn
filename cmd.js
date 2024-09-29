@@ -180,7 +180,49 @@ function checkConnection(callback) {
     });
 }
 
+// 循环检测以太网是否打开
+function isEthernetConnected() {
+    return new Promise((resolve, reject) => {
+        exec('ipconfig /all', { encoding: 'buffer' }, (error, stdout, stderr) => {
+            if (error) {
+                reject(new Error(`执行命令时出错: ${stderr}`));
+                return;
+            }
+            const output = iconv.decode(stdout, 'gbk');
+            const lines = output.split('\n');
+            
+            let ethernet = false;
+            let mediaDisconnected = false; 
+            
+            lines.forEach(line => {
+                line = line.trim();
+                
+                if (line.startsWith('以太网适配器') || line.startsWith('Ethernet adapter')) {
+                    ethernet = true;
+                }
+                
+                if (ethernet && (line.startsWith('媒体状态') || line.startsWith('Media State'))) {
+                    if (line.includes('已断开连接') || line.includes('disconnected')) {
+                        mediaDisconnected = true;
+                    }else{ // 连接的情况
+                        mediaDisconnected = false;
+                        resolve(true); 
+                        console.log('以太网已连接');
+                        return;
+                    }
+                }
+                
+                
+            });
 
+            if (mediaDisconnected) {
+                resolve(false); 
+                console.log('以太网未连接');
+                return;
+            }
+        });
+    });
+}
 
 module.exports = {
     findMacAddress,
@@ -192,4 +234,5 @@ module.exports = {
     checkExistedProfile,
     connectToProfile,
     checkConnection,
+    isEthernetConnected,
 };
