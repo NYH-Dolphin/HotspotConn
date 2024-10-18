@@ -412,9 +412,7 @@ async function createProfileXML(ssid, password) {
 	}
 }
 
+// 使用该模块进行配网即可
 module.exports = {
-	startServer,
-	checkIsStartServer,
-	tryConnectProfile,
 	setup,
 };
