@@ -1,9 +1,10 @@
 const { exec } = require('child_process');
 const iconv = require('iconv-lite');
+const { resolve } = require('path');
 
 // 查找 mac 地址
 function findMacAddress() {
-    return new Promise((resolve, reject) =>{
+    return new Promise((resolve, reject) => {
         exec('ipconfig /all', { encoding: 'buffer' }, (error, stdout, stderr) => {
             const output = iconv.decode(stdout, 'gbk');
             if (error) {
@@ -21,15 +22,47 @@ function findMacAddress() {
                     macAddress = line.split(': ')[1].replace(/-/g, '');
                 }
             });
-    
+
             if (macAddress) {
                 console.log('找到以太网的MAC地址', macAddress);
                 resolve(macAddress);
             } else {
                 console.log('未找到以太网的MAC地址');
-                resolve("");
+                // 未找到以太网的 MAC 地址，尝试查找无线网的 MAC 地址
+                const interfaces = os.networkInterfaces();
+                for (let interfaceName in interfaces) {
+                    const interfaceInfo = interfaces[interfaceName];
+                    if (!interfaceName.includes("WLAN")) {
+                        continue;
+                    }
+                    interfaceInfo.forEach(info => {
+                        if (info.mac && !info.internal) {
+                            const macAddress = info.mac.replace(/:/g, ''); // 去掉冒号
+                            console.log('找到无线网的MAC地址', macAddress);
+                            resolve(macAddress);
+                        }
+                    });
+                }
+                console.log('未找到无线网的MAC地址');
+                reject('');
             }
         });
+    });
+}
+
+// 查找所有的适配器
+function findInterfaces() {
+    return new Promise((resolve, rejects) => {
+        const showAllInterfaceCommand = 'netsh interface show interface';
+        exec(showAllInterfaceCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
+            const output = iconv.decode(stdout, 'gbk');
+            if (error) {
+                console.log(`无法查找到适配器 ${output}`);
+                return rejects(`无法查找到适配器 ${output}`);
+            }
+            console.log(output);
+            resolve(output);
+        })
     });
 }
 
@@ -38,11 +71,11 @@ function createHotspot(ssid, password) {
     return new Promise((resolve, reject) => {
         const createHostedNetworkCommand = `netsh wlan set hostednetwork mode=allow ssid=${ssid} key=${password}`;
         exec(createHostedNetworkCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`创建承载网络时出错: ${stderr}`);
-                return reject(`创建承载网络时出错: ${stderr}`);
-            }
             const output = iconv.decode(stdout, 'gbk');
+            if (error) {
+                console.log(`创建承载网络时出错: ${output}`);
+                return reject(`创建承载网络时出错: ${output}`);
+            }
             console.log(output);
             resolve(output);
         });
@@ -56,7 +89,7 @@ function startHotspot() {
         exec(startHostnetworkCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
             const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                console.error(output);
+                console.log(output);
                 return reject(output);
             } else {
                 console.log(output);
@@ -73,7 +106,7 @@ function stopHotspot() {
         exec(startHostnetworkCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
             const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                console.error(output);
+                console.log(output);
                 return reject(output);
             } else {
                 console.log(output);
@@ -84,6 +117,28 @@ function stopHotspot() {
 }
 
 
+
+// 配置Internet Connection Service，共享 WLAN 给 本地连接
+function setupICS(public, private) {
+    return new Promise((resolve, reject) => {
+        const cmd = `powershell.exe -Command "& {Set-Ics -PublicConnectionName '${public}' -PrivateConnectionName '${private}'}"`;
+        console.log("Executing command: ", cmd);
+        
+        // 执行 PowerShell 命令
+        exec(cmd, { encoding: 'buffer' }, (error, stdout, stderr) => {
+            const output = iconv.decode(stderr, 'gbk');     
+            if (error) {
+                console.log(output);
+                return reject(output); 
+            } else { 
+                console.log( output);  
+                return resolve(output);
+            }
+        });
+    });
+    
+}
+
 // 添加指定的 Profile
 function addToProfile(profilePath) {
     console.log("添加新的配置文件");
@@ -91,12 +146,11 @@ function addToProfile(profilePath) {
         const addProfileCommand = `netsh wlan add profile filename="${profilePath}"`;
         console.log(addProfileCommand);
         exec(addProfileCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
+            const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                const output = iconv.decode(stdout, 'gbk'); // 将 GBK 编码的输出转换为 UTF-8
-                console.error(`添加配置文件失败: ${output}`);
+                console.log(`添加配置文件失败: ${output}`);
                 return reject(`添加配置文件失败: ${output}`);
             }
-            const output = iconv.decode(stdout, 'gbk');
             console.log(`配置文件添加成功: ${output}`);
             resolve(`配置文件添加成功: ${output}`);
         });
@@ -111,7 +165,7 @@ function deleteProfile(ssid) {
         exec(deleteProfileCommand, { encoding: 'buffer' }, (error, stdout, stderr) => {
             const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                console.error(`删除配置文件失败: ${output}`);
+                console.log(`删除配置文件失败: ${output}`);
                 return reject(`删除配置文件失败: ${output}`);
             } else {
                 console.log(`配置文件已删除: ${output}`);
@@ -129,7 +183,7 @@ function connectToProfile(ssid) {
         exec(connectCommand, (error, stdout, stderr) => {
             const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                console.error(`连接失败: ${output}`);
+                console.log(`连接失败: ${output}`);
                 return reject(`连接失败：${output}`);
             }
             console.log(`尝试连接到 ${ssid}`);
@@ -144,11 +198,11 @@ function checkExistedProfile() {
         const showProfileCmd = 'netsh wlan show profile';
         let profiles = [];
         exec(showProfileCmd, { encoding: 'buffer' }, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`执行命令时出错: ${stderr}`);
-                return reject(`执行命令时出错: ${stderr}`);
-            }
             const output = iconv.decode(stdout, 'gbk'); // 将 GBK 编码的输出转换为 UTF-8
+            if (error) {
+                console.log(`执行命令时出错: ${output}`);
+                return reject(`执行命令时出错: ${output}`);
+            }
 
             // 使用正则表达式提取用户配置文件的信息
             const regex = /(所有用户配置文件|All User Profile)\s+:\s(.+)/g;
@@ -170,59 +224,80 @@ function checkExistedProfile() {
 }
 
 // 检查网络连接
-function checkConnection(callback) {
-    exec('ping -n 1 www.baidu.com', (error, stdout, stderr) => {
-        if (error) {
-            callback(false);  // ping 失败，表示未连接到网络
-        } else {
-            callback(true);  // ping 成功，表示已连接到网络
-        }
-    });
+function checkConnection() {
+    return new Promise((resolve, reject) => {
+        exec('ping -n 1 load.yinlangtech.com', (error, stdout, stderr) => {
+            if (error) {
+                // ping 失败，表示未连接到网络
+                resolve(false);
+            } else {
+                // ping 成功，表示已连接到网络
+                resolve(true);
+            }
+        });
+    })
 }
 
 // 循环检测以太网是否打开
 function isEthernetConnected() {
     return new Promise((resolve, reject) => {
         exec('ipconfig /all', { encoding: 'buffer' }, (error, stdout, stderr) => {
+            const output = iconv.decode(stdout, 'gbk');
             if (error) {
-                reject(new Error(`执行命令时出错: ${stderr}`));
+                reject(new Error(`执行命令时出错: ${output}`));
                 return;
             }
-            const output = iconv.decode(stdout, 'gbk');
+            
             const lines = output.split('\n');
-            
+
             let ethernet = false;
-            let mediaDisconnected = false; 
-            
+            let mediaDisconnected = false;
+
             lines.forEach(line => {
                 line = line.trim();
-                
+
                 if (line.startsWith('以太网适配器') || line.startsWith('Ethernet adapter')) {
                     ethernet = true;
                 }
-                
+
                 if (ethernet && (line.startsWith('媒体状态') || line.startsWith('Media State'))) {
                     if (line.includes('已断开连接') || line.includes('disconnected')) {
                         mediaDisconnected = true;
-                    }else{ // 连接的情况
+                    } else { // 连接的情况
                         mediaDisconnected = false;
-                        resolve(true); 
+                        resolve(true);
                         console.log('以太网已连接');
                         return;
                     }
                 }
-                
-                
             });
 
             if (mediaDisconnected) {
-                resolve(false); 
+                resolve(false);
                 console.log('以太网未连接');
                 return;
             }
         });
     });
 }
+
+
+// 启用 Wi-Fi 适配器
+function enableWiFiAdapter(adapterName) {
+    return new Promise((resolve, rejects) => {
+        console.log(`netsh interface set interface "${adapterName}" admin=enabled`);
+        exec(`netsh interface set interface "${adapterName}" admin=enabled`, { encoding: 'buffer' }, (err, stdout, stderr) => {
+            const output = iconv.decode(stdout, 'gbk');
+            if (err) {
+                console.log(`启用 ${adapterName} 时出错: ${output}`);
+                rejects(`启用 ${adapterName} 时出错: ${output}`);
+            }
+            console.log(`${adapterName} 适配器已启用: ${output}`);
+            resolve(`${adapterName} 适配器已启用: ${output}`);
+        });
+    });
+}
+
 
 module.exports = {
     findMacAddress,
@@ -235,4 +310,7 @@ module.exports = {
     connectToProfile,
     checkConnection,
     isEthernetConnected,
+    findInterfaces,
+    enableWiFiAdapter,
+    setupICS
 };
